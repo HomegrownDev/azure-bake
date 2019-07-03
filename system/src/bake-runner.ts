@@ -1,28 +1,35 @@
-import { IBakePackage, IBakeRegion, IIngredient, IBakeAuthentication, BakeEval, IBakeConfig} from "@azbake/core";
+import { IBakePackage, IBakeRegion, IIngredient, IBakeAuthentication, BakeEval, IBakeConfig, IngredientManager, TagGenerator} from "@azbake/core";
 import {IngredientFactory} from './ingredients'
 import {red, cyan} from 'colors'
 import { DeploymentContext, Logger } from "@azbake/core"
 import * as msRestNodeAuth from "@azure/ms-rest-nodeauth"
-import {ResourceManagementClient, ResourceManagementModels, ResourceManagementMappers} from "@azure/arm-resources"
+import {ResourceManagementClient} from "@azure/arm-resources"
 import { ResourceGroup } from "@azure/arm-resources/esm/models";
 
 export class BakeRunner {
     constructor(bPackage: IBakePackage, logger? : Logger){
 
         this._package = bPackage
-        this._logger = logger || new Logger()
-        this._AuthCreds = <msRestNodeAuth.TokenCredentialsBase>{}
+        this._logger = logger || new Logger([], bPackage.Environment.logLevel)
+        this._AuthCreds = <msRestNodeAuth.ApplicationTokenCredentials>{}
     }
 
     _package: IBakePackage
     _logger: Logger
-    _AuthCreds: msRestNodeAuth.TokenCredentialsBase
+    _AuthCreds: msRestNodeAuth.ApplicationTokenCredentials
+
+    private _loadBuiltIns(){
+
+        //register required ingredients
+        IngredientManager.Register('@azbake/ingredient-utils')
+    }
 
     private async _executeBakeLoop(ingredientNames: string[], finished: string[], ctx: DeploymentContext) : Promise<boolean> {
 
         let recipe = ctx.Config.recipe
         let count = ingredientNames.length
 
+        let foundErrors = false
         let executing: Array<Promise<string>> = []
         for(let i=0; i<count; ++i){
 
@@ -45,14 +52,28 @@ export class BakeRunner {
             if (depsDone){
                 let exec = IngredientFactory.Build(ingredientName, ingredient, ctx)
                 if (exec) {
-                    let promise = exec.Execute()
+
+                    let promise = exec.Execute().then(()=>{return ingredientName}).catch((err)=>{
+                        this._logger.error(err)
+                        foundErrors = true
+                        return ingredientName
+                    })
+
                     executing.push(promise)
-                }    
+                } else {
+                    this._logger.error("Could not find ingredient type " + ingredient.properties.type + " for " + ingredientName)
+                    foundErrors = true
+                    finished.push(ingredientName)
+                }
             }
         }
 
         let results = await Promise.all(executing)
         results.forEach(r=>finished.push(r))
+
+        if (foundErrors) {
+            throw new Error()
+        }
 
         return ingredientNames.length != finished.length
     }
@@ -60,27 +81,32 @@ export class BakeRunner {
     private async _bakeRegion(ctx: DeploymentContext): Promise<boolean> {
 
         try {
-            let util = require('./bake-library/functions')
-            util.setContext(ctx)
-            
-            let rg_name = util.resource_group()
+            var util = IngredientManager.getIngredientFunction("coreutils", ctx)
+
+            let rg_name = await util.resource_group()
             let region_name = ctx.Region.shortName
 
-            let client = new ResourceManagementClient(ctx.AuthToken, ctx.Environment.authentication.subscriptionId)
 
-            let rgExists = false
-            try {
-                let chkResult = await client.resourceGroups.checkExistence(rg_name)
-                rgExists = chkResult.body                
-            }
-            catch{}
-
-            if (!rgExists){
-
-                ctx.Logger.log('Setting up resource group ' + cyan(rg_name))
-                await client.resourceGroups.createOrUpdate(rg_name, <ResourceGroup>{
-                    location: region_name
-                })
+            if (ctx.Config.resourceGroup) {
+                let client = new ResourceManagementClient(ctx.AuthToken, ctx.Environment.authentication.subscriptionId)
+                
+                let rgExists = false
+                try {
+                    let chkResult = await client.resourceGroups.checkExistence(rg_name)
+                    rgExists = chkResult.body                
+                }
+                catch{}
+    
+                if (!rgExists){
+    
+                    let tagGenerator = new TagGenerator(ctx)
+    
+                    ctx.Logger.log('Setting up resource group ' + cyan(rg_name))
+                    await client.resourceGroups.createOrUpdate(rg_name, <ResourceGroup>{
+                        tags:  tagGenerator.GenerateTags(),
+                        location: region_name
+                    })
+                }
             }
 
             let recipe = ctx.Config.recipe
@@ -94,9 +120,14 @@ export class BakeRunner {
             })
 
             let finished: string[] = []
-            let loopHasRemaining = await this._executeBakeLoop(ingredientNames, finished, ctx)
+            let loopHasRemaining: boolean = true
             while(loopHasRemaining) {
-                loopHasRemaining = await this._executeBakeLoop(ingredientNames, finished, ctx)
+                try{
+                    loopHasRemaining = await this._executeBakeLoop(ingredientNames, finished, ctx)
+                }
+                catch{
+                    throw new Error()
+                }
             }
 
             ctx.Logger.log('Finished baking')
@@ -111,6 +142,11 @@ export class BakeRunner {
 
         this._logger.log("logging into azure...")
         var result = await this._package.Authenticate( async (auth) =>{
+
+            if (auth.skipAuth) {
+                this._logger.log("Skipping Azure login")
+                return true
+            }
 
             //TODO, new login does not support certificate SP login.
             try {
@@ -129,19 +165,27 @@ export class BakeRunner {
 
     public async bake(regions: Array<IBakeRegion>): Promise<void> {
 
+        this._loadBuiltIns()
+
         if (this._package.Config.parallelRegions) {
             let tasks: Array<Promise<boolean>> = []
 
             regions.forEach(region=>{
                 let ctx = new DeploymentContext(this._AuthCreds, this._package, region,
-                    new Logger(this._logger.getPre().concat(region.name)))
+                    new Logger(this._logger.getPre().concat(region.name), this._package.Environment.logLevel))
                 let task = this._bakeRegion(ctx)
                 tasks.push(task)    
             })
-            let results = await Promise.all(tasks)    
-            let allResultsGood : boolean = true
-            results.forEach(result=>{if (!result)allResultsGood = false})
-            if (!allResultsGood) {
+
+            try {
+                let results = await Promise.all(tasks)    
+                let allResultsGood : boolean = true
+                results.forEach(result=>{if (!result)allResultsGood = false})
+                if (!allResultsGood) {
+                    throw new Error('Not all regions deployed successfully')
+                }    
+            }
+            catch{
                 throw new Error('Not all regions deployed successfully')
             }
 
@@ -150,8 +194,14 @@ export class BakeRunner {
             for(let i=0; i < count;++i){
                 let region = regions[i]
                 let ctx = new DeploymentContext(this._AuthCreds, this._package, region, 
-                    new Logger(this._logger.getPre().concat(region.name)))
-                await this._bakeRegion(ctx)
+                    new Logger(this._logger.getPre().concat(region.name), this._package.Environment.logLevel))
+
+                try{
+                    await this._bakeRegion(ctx)                    
+                }
+                catch(err){
+                    throw err
+                }
             } 
         }
     }

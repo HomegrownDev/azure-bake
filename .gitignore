@@ -5,3 +5,19 @@
 ### NPM
 node_modules
 dist
+system/lerna-debug\.log
+*.tgz
+
+node_modules/
+.npmrc
+lerna-debug.log
+npm-debug.log
+lib
+.idea
+*.vsix
+
+azdevops/**/*.js
+!azdevops/imports/**/*.js
+/.vs
+.env
+/.devcontainer

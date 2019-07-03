@@ -1,0 +1,134 @@
+{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01-preview/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "eventHubNamespaceName": {
+      "type": "String"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources."
+      }
+    },
+    "skuName": {
+      "type": "String",
+      "defaultValue": "Standard",
+      "allowedValues": [
+        "Basic",
+        "Standard"
+      ]
+    },
+    "skuTier": {
+      "type": "String",
+      "defaultValue": "Standard",
+      "allowedValues": [
+        "Basic",
+        "Standard"
+      ]
+    },
+    "skuCapacity": {
+      "type": "String"
+    },
+    "isAutoInflateEnabled": {
+      "type": "String",
+      "defaultValue": "true"
+    },
+    "maximumThroughputUnits": {
+      "type": "String",
+      "defaultValue": "10"
+    },
+    "diagnosticsEnabled": {
+        "type": "string",
+        "defaultValue": "yes"
+    },
+    "diagnosticsSettingName": {
+       "type": "string",
+       "defaultValue": "diagToEHN"
+    },
+    "diagnosticsEventHubNamespace": {
+       "type": "string",
+       "defaultValue": ""
+    },
+    "diagnosticsEventHubNamespaceResourceGroup": {
+       "type": "string",
+       "defaultValue": ""
+    },
+    "diagnosticsEventHubAuthorizationRule": {
+       "type": "string",
+       "defaultValue": "RootManageSharedAccessKey"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.EventHub/namespaces",
+      "apiVersion": "2018-01-01-preview",
+      "name": "[parameters('eventHubNamespaceName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('skuName')]",
+        "tier": "[parameters('skuTier')]",
+        "capacity": "[parameters('skuCapacity')]"
+      },
+      "properties": {
+        "isAutoInflateEnabled": "[parameters('isAutoInflateEnabled')]",
+        "maximumThroughputUnits": "[parameters('maximumThroughputUnits')]"
+      },
+      "tags": {
+        "Metrics": "*"
+      },
+      "resources": [
+          {
+              "condition": "[equals(parameters('diagnosticsEnabled'), 'yes')]",
+            "type": "providers/diagnosticSettings",
+            "name": "[concat('Microsoft.Insights/', parameters('diagnosticsSettingName'))]",
+            "dependsOn": [
+              "[resourceId('Microsoft.EventHub/namespaces', parameters('eventHubNamespaceName'))]"
+            ],
+            "apiVersion": "2017-05-01-preview",
+            "properties": {
+              "name": "[parameters('diagnosticsSettingName')]",
+              "eventHubAuthorizationRuleId": "[resourceId(parameters('diagnosticsEventHubNamespaceResourceGroup'),'Microsoft.EventHub/namespaces/authorizationRules', parameters('diagnosticsEventHubNamespace'), parameters('diagnosticsEventHubAuthorizationRule'))]",
+              "logs": [
+                {
+                  "category": "ArchiveLogs",
+                  "enabled": true,
+                  "retentionPolicy": {
+                    "days": 0,
+                    "enabled": false
+                  }
+                },
+                {
+                  "category": "OperationalLogs",
+                  "enabled": true,
+                  "retentionPolicy": {
+                    "days": 0,
+                    "enabled": false
+                  }
+                },
+                {
+                  "category": "AutoScaleLogs",
+                  "enabled": true,
+                  "retentionPolicy": {
+                    "days": 0,
+                    "enabled": false
+                  }
+                }
+              ],
+              "metrics": [
+                {
+                  "timeGrain": "PT1M",
+                  "enabled": true,
+                  "retentionPolicy": {
+                    "enabled": false,
+                    "days": 0
+                  }
+                }
+              ]
+            }
+          }        
+      ]
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "name": {
+            "type": "string"
+        },
+        "routing-method": {
+            "defaultValue": "Performance",
+            "type": "string"
+        },
+        "interval": {
+            "defaultValue": "10",
+            "type": "string"
+        },
+        "protocol": {
+            "defaultValue": "HTTPS",
+            "type": "string"
+        },
+        "port": {
+            "defaultValue": "443",
+            "type": "string"
+        },
+        "ttl": {
+            "defaultValue": "10",
+            "type": "string"
+        },
+        "path": {
+            "defaultValue": "/",
+            "type": "string"
+        },
+        "number-of-failures": {
+            "defaultValue": "3",
+            "type": "string"
+        },
+        "timeout": {
+            "defaultValue": "5",
+            "type": "string"
+        },
+        "source-type": {
+            "type": "string"
+        },
+        "diagnosticsEnabled": {
+            "type": "string",
+            "defaultValue": "yes",
+            "metadata": {
+                "description": "Specifies whether to configure diagnostic settings to expose logs and metrics for consumption."
+            }
+        },
+        "diagnosticsSettingName": {
+            "type": "string",
+            "defaultValue": "diagToEHN",
+            "metadata": {
+                "description": "Diagnostic setting name.  Most by unique for the resource."
+            }
+        },
+        "diagnosticsEventHubResourceGroup": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "The resource group of the Event Hub Namespace where diagnostics are sent."
+            }
+        },
+        "diagnosticsEventHubNamespace": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "The Event Hub Namespace where diagnostics are sent."
+            }
+        },
+        "diagnosticsEventHubAuthorizationRule": {
+            "type": "string",
+            "defaultValue": "RootManageSharedAccessKey",
+            "metadata": {
+                "description": "The authorization rule to use for transmitting diagnostics."
+            }
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "comments": "",
+            "type": "Microsoft.Network/trafficManagerProfiles",
+            "name": "[parameters('name')]",
+            "apiVersion": "2018-04-01",
+            "location": "global",
+            "tags": {
+                "Metrics": "*"
+            },
+            "scale": null,
+            "properties": {
+                "profileStatus": "Enabled",
+                "trafficRoutingMethod": "[parameters('routing-method')]",
+                "dnsConfig": {
+                    "relativeName": "[parameters('name')]",
+                    "ttl": "[parameters('ttl')]"
+                },
+                "monitorConfig": {
+                    "profileMonitorStatus": null,
+                    "protocol": "[parameters('protocol')]",
+                    "port": "[parameters('port')]",
+                    "path": "[parameters('path')]",
+                    "intervalInSeconds": "[parameters('interval')]",
+                    "toleratedNumberOfFailures": "[parameters('number-of-failures')]",
+                    "timeoutInSeconds": "[parameters('timeout')]",
+                    "customHeaders": [],
+                    "expectedStatusCodeRanges": []
+                },
+                "endpoints": [ ],
+                "trafficViewEnrollmentStatus": "Disabled"
+            },
+            "dependsOn": [],
+            "resources": [
+                {
+                    "condition": "[equals(parameters('diagnosticsEnabled'), 'yes')]",
+                  "type": "providers/diagnosticSettings",
+                  "name": "[concat('Microsoft.Insights/', parameters('diagnosticsSettingName'))]",
+                  "dependsOn": [
+                    "[resourceId('Microsoft.Network/trafficManagerProfiles', parameters('name'))]"
+                  ],
+                  "apiVersion": "2017-05-01-preview",
+                  "properties": {
+                    "name": "[parameters('diagnosticsSettingName')]",
+                    "eventHubAuthorizationRuleId": "[resourceId(parameters('diagnosticsEventHubResourceGroup'),'Microsoft.EventHub/namespaces/authorizationRules', parameters('diagnosticsEventHubNamespace'), parameters('diagnosticsEventHubAuthorizationRule'))]",
+                    "logs": [
+                      {
+                        "category": "ProbeHealthStatusEvents",
+                        "enabled": true,
+                        "retentionPolicy": {
+                          "days": 0,
+                          "enabled": false
+                        }
+                      }
+                    ],
+                    "metrics": [
+                      {
+                        "timeGrain": "PT1M",
+                        "enabled": true,
+                        "retentionPolicy": {
+                          "enabled": false,
+                          "days": 0
+                        }
+                      }
+                    ]
+                  }
+                }        
+              ]
+        }
+    ]
+}

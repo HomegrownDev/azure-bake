@@ -1,0 +1,38 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": { 
+        "webapp_name": {
+            "type": "string"
+        },
+        "host_name": {
+            "type": "string"
+        },
+        "cert_rg": {
+            "type": "string"
+        },
+        "cert_name": {
+            "type": "string"
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resource().location]"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Web/sites/hostnameBindings",
+            "name": "[concat(parameters('webapp_name'), '/', parameters('host_name'))]",
+            "apiVersion": "2016-08-01",
+            "location": "[parameters('location')]",
+            "properties": {
+                "siteName": "[parameters('webapp_name')]",
+                "azureResourceType": "Website",
+                "azureResourceName": "[parameters('webapp_name')]",
+                "sslState": "SniEnabled",
+                "thumbprint": "[reference(resourceId(parameters('cert_rg'), 'Microsoft.Web/certificates', parameters('cert_name')), '2016-03-01').Thumbprint]"
+            }
+        }
+    ]
+}
